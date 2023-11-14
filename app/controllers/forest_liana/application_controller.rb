@@ -188,40 +188,38 @@ module ForestLiana
       collection_name = ForestLiana.name_for(model)
       field_names_requested = params[:fields][collection_name].split(',').map { |name| name.to_s }
       fields_to_serialize = fields_per_model(params[:fields], model)
+      content = []
+      content << ::CSV::Row.new(field_names_requested, csv_header, true).to_s
+      getter.query_for_batch.find_in_batches() do |records|
+        records.each do |record|
+          json = serialize_model(record, {
+            include: getter.includes.map(&:to_s),
+            fields: fields_to_serialize
+          })
+          record_attributes = json['data']['attributes']
+          record_relationships = json['data']['relationships'] || {}
+          included = json['included']
 
-      self.response_body = Enumerator.new do |content|
-        content << ::CSV::Row.new(field_names_requested, csv_header, true).to_s
-        getter.query_for_batch.find_in_batches() do |records|
-          records.each do |record|
-            json = serialize_model(record, {
-              include: getter.includes.map(&:to_s),
-              fields: fields_to_serialize
-            })
-            record_attributes = json['data']['attributes']
-            record_relationships = json['data']['relationships'] || {}
-            included = json['included']
+          values = field_names_requested.map do |field_name|
+            if record_attributes[field_name]
+              record_attributes[field_name]
+            elsif record_relationships[field_name] &&
+              record_relationships[field_name]['data']
+              relationship_id = record_relationships[field_name]['data']['id']
+              relationship_type = record_relationships[field_name]['data']['type']
+              relationship_object = included.select do |object|
+                object['id'] == relationship_id && object['type'] == relationship_type
+              end
 
-            values = field_names_requested.map do |field_name|
-              if record_attributes[field_name]
-                record_attributes[field_name]
-              elsif record_relationships[field_name] &&
-                record_relationships[field_name]['data']
-                relationship_id = record_relationships[field_name]['data']['id']
-                relationship_type = record_relationships[field_name]['data']['type']
-                relationship_object = included.select do |object|
-                  object['id'] == relationship_id && object['type'] == relationship_type
-                end
-
-                relationship_object = relationship_object.first
-                if relationship_object && relationship_object['attributes']
-                  relationship_object['attributes'][params[:fields][field_name]]
-                else
-                  nil
-                end
+              relationship_object = relationship_object.first
+              if relationship_object && relationship_object['attributes']
+                relationship_object['attributes'][params[:fields][field_name]]
+              else
+                nil
               end
             end
-            content << ::CSV::Row.new(field_names_requested, values).to_s
           end
+          content << ::CSV::Row.new(field_names_requested, values).to_s
         end
       end
     end
