@@ -222,6 +222,7 @@ module ForestLiana
           content << ::CSV::Row.new(field_names_requested, values).to_s
         end
       end
+      content
     end
 
     def set_headers_file
